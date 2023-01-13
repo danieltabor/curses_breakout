@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 ## Copyright (c) 2022 Daniel Tabor
 ##
 ## Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@ import traceback
 try:
 	import curses
 except ImportError:
-	print "This program requires curses."
+	print("This program requires curses.")
 	sys.exit(0)
 
 PADDLE_WIDTH = 0.20
@@ -43,12 +43,13 @@ KEY_RIGHT = ord(".")
 KEY_SPACE = ord(" ")
 
 class Sprite:
-	def __init__(self,text,y=0,x=0):
+	def __init__(self,text,color,y=0,x=0):
 		self.x = x
 		self.y = y
 		self.text = [[c for c in line] for line in text.split("\n")]
 		self.h = len(self.text)
 		self.w = len(self.text[0])
+		self.color = color
 
 	def move(self,y,x):
 		if self.y != y or self.x != x:
@@ -59,22 +60,41 @@ class Sprite:
 	def clear(self):
 		intx = int(round(self.x))
 		inty = int(round(self.y))
-		[[scr.addch(inty+y,intx+x," ") for x in xrange(self.w) if intx+x>=0 and intx+x<scrw] for y in xrange(self.h) if inty+y>=0 and inty+y<scrh]
+		scr.attroff(curses.A_BOLD)
+		scr.attron(curses.color_pair(1))
+		[[scr.addch(inty+y,intx+x," ") for x in range(self.w) if intx+x>=0 and intx+x<scrw] for y in range(self.h) if inty+y>=0 and inty+y<scrh]
 
+	def _set_color(self,y=None):
+		if self.color[0]:
+			scr.attron(curses.A_BOLD)
+		else:
+			scr.attroff(curses.A_BOLD)
+		scr.attron(curses.color_pair(self.color[1]))
+		
+	
 	def draw(self):
 		intx = int(round(self.x))
 		inty = int(round(self.y))
-		[[scr.addch(inty+y,intx+x,self.text[y][x]) for x in xrange(self.w) if intx+x>=0 and intx+x<scrw] for y in xrange(self.h) if inty+y>=0 and inty+y<scrh]
-		
+		for y in range(self.h):
+			scry = inty+y
+			if scry < 0:
+				continue
+			elif scry >= scrh:
+				break
+			self._set_color(y)
+			try:
+				[scr.addch(scry,intx+x,self.text[y][x]) for x in range(self.w) if intx+x>=0 and intx+x<scrw]
+			except:
+				pass
 
 class Paddle(Sprite):
 	def __init__(self):
 		width = int(PADDLE_WIDTH*scrw)
 		text = "="*int(width)
-		Sprite.__init__(self,text,scrh-2,(scrw-width)/2)
+		Sprite.__init__(self,text,(True,1),scrh-2,int((scrw-width)/2))
 
 	def move(self,x):
-		##The following code adds end spots to the paddle
+		##The following code adds end stops to the paddle
 		#if x<0:
 		#	x = 0
 		#if x+self.w >= scrw:
@@ -83,7 +103,7 @@ class Paddle(Sprite):
 
 class Ball(Sprite):
 	def __init__(self):
-		Sprite.__init__(self,"O",scrh/2,scrw/2)
+		Sprite.__init__(self,"O",(True,1),scrh/2,scrw/2)
 		self.vel_x = 0
 		self.vel_y = 0
 		self.lastx = self.x
@@ -92,6 +112,13 @@ class Ball(Sprite):
 	def ready_to_spawn(self):
 		if self.vel_x == 0 and self.vel_y == 0:
 			return True
+
+	def reset(self):
+		self.clear()
+		self.y = scrh/2
+		self.x = scrw/2
+		self.vel_x = 0
+		self.vel_y = 0
 
 	def spawn(self):
 		self.vel_y = 0.1
@@ -133,44 +160,63 @@ class Ball(Sprite):
 			xper = -2*(float(self.x-paddle.x)/paddle.w - 0.5)
 			self.vel_x = xper*self.vel_y
 		elif inty == scrh:
-			self.clear()
-			self.y = scrh/2
-			self.x = scrw/2
-			self.vel_x = 0
-			self.vel_y = 0
+			self.reset()
 			ret_died = True
 
-		if abs(self.vel_x) > 1:
+		if self.vel_x > 1:
 			self.vel_x = 1
-		elif abs(self.vel_x) < -1:
+			self.x = intx
+		elif self.vel_x < -1:
 			self.vel_x = -1
-		if abs(self.vel_y) > 1:
+			self.x = intx
+		if self.vel_y > 1:
 			self.vel_y = 1
-		elif abs(self.vel_y) < -1:
+			self.y = inty
+		elif self.vel_y < -1:
 			self.vel_y = -1
+			self.y = inty
 		Sprite.move(self,self.y+self.vel_y,self.x+self.vel_x)
 		return ret_score,ret_died
 
 class Bricks(Sprite):
 	def __init__(self):
-		text = "\n".join(["".join(["@" for x in xrange(scrw-6)]) for y in xrange(int(scrh*0.20))])
-		Sprite.__init__(self,text,int(scrh*0.20),3)
+		text = "\n".join(["".join(["@" for x in range(scrw-6)]) for y in range(int(scrh*0.20))])
+		self.count = sum([1 for c in text if c == "@"])
+		Sprite.__init__(self,text,(None,None),int(scrh*0.20),3)
+		self.colors = [2,3,4,5]
 
 	def collision(self,y,x):
 		if y>= self.y and y<self.y+self.h and x>=self.x and x<self.x+self.w:
 			if self.text[y-self.y][x-self.x] == "@":
 				self.text[y-self.y][x-self.x] = " "
+				self.count = self.count - 1
 				return True
 		else:
 			return False
+
+	def get_count(self):
+		return self.count
+
+	def _set_color(self,y=None):
+		if y == None:
+			y = 0
+		bold = 1-((int(y)/int(len(self.colors)))%2)
+		color = self.colors[y%len(self.colors)]
+		if bold:
+			scr.attron(curses.A_BOLD)
+		else:
+			scr.attroff(curses.A_BOLD)
+		scr.attron(curses.color_pair(color))
 	
 
 def draw_frame():
 	global score
 	global ball_count
-	[[scr.addch(y,0,"#"),scr.addch(y,scrw-1,"#")] for y in xrange(scrh-2)]
-	[scr.addch(0,x,"#") for x in xrange(scrw)]
-	scr.addstr(scrh-1,2,"Score: %d" % score)
+	scr.attroff(curses.A_BOLD)
+	scr.attron(curses.color_pair(1))
+	[[scr.addch(y,0,"#"),scr.addch(y,scrw-1,"#")] for y in range(scrh-2)]
+	[scr.addch(0,x,"#") for x in range(scrw)]
+	scr.addstr(scrh-1,2,"Score: %4s" % str(score))
 	scr.addstr(scrh-1,scrw-10,"Balls: %d" % ball_count)
 
 
@@ -178,14 +224,21 @@ def reset():
 	global score
 	global ball_count
 	global bricks
+	global ball
 	score = 0
 	ball_count = 5
 	bricks = Bricks()
+	ball.reset()
 
-def dialog(text):
-	x = (scrw-len(text[0]))/2
-	y = (scrh-len(text))/2
-	[ scr.addstr(y+i,x,text[i]) for i in xrange(len(text))]
+def dialog(text,color):
+	x = int((scrw-len(text[0]))/2)
+	y = int((scrh-len(text))/2)
+	if color[0]:
+		scr.attron(curses.A_BOLD)
+	else:
+		scr.attroff(curses.A_BOLD)
+	scr.attron(curses.color_pair(color[1]))
+	[ scr.addstr(y+i,x,text[i]) for i in range(len(text))]
 	scr.refresh()
 	while True:
 		input = scr.getch()
@@ -195,7 +248,11 @@ def dialog(text):
 			curses.endwin()
 			sys.exit(0)
 		time.sleep(0.010)
-	[[scr.addch(y+i,x+j," ") for j in xrange(len(text[0]))] for i in xrange(len(text))]
+	[[scr.addch(y+i,x+j," ") for j in range(len(text[0]))] for i in range(len(text))]
+	scr.attroff(curses.A_BOLD)
+	scr.attron(curses.color_pair(1))
+	[[scr.addch(y+i,x+j," ") for j in range(len(text[i]))] for i in range(len(text))]
+	
 
 welcome=["+--------------------------------------------+",
 	 "|                 Breakout                   |",
@@ -204,11 +261,11 @@ welcome=["+--------------------------------------------+",
  	 "| Controls:                                  |",
 	 "| [Space] to start                           |",
 	 "| [<] to move paddle left                    |",
-	 "| [>] to mvoe paddle right                   |",
+	 "| [>] to move paddle right                   |",
 	 "| [p] to pause                               |",
 	 "| [q] to quit                                |",
 	 "+--------------------------------------------+",
-	 "| Copyright Georgia Tech Research Institute  |",
+	 "| Copyright George P. Burdell                |",
          "|   All contents are proprietary and no      |",
 	 "|   license is granted to anyone to play,    |",
 	 "|   observe, or otherwise enjoy this work.   |",
@@ -240,6 +297,7 @@ def main():
 	global paddle
 	global score
 	global ball_count
+	global ball
 
 	try:
 		scr = curses.initscr()
@@ -248,17 +306,28 @@ def main():
 		curses.nocbreak()
 		scr.keypad(True)
 		scr.nodelay(True)
+		curses.start_color()
+		curses.init_pair(1,curses.COLOR_WHITE,curses.COLOR_BLACK)
+		curses.init_pair(2,curses.COLOR_BLUE,curses.COLOR_BLACK)
+		curses.init_pair(3,curses.COLOR_RED,curses.COLOR_BLACK)
+		curses.init_pair(4,curses.COLOR_GREEN,curses.COLOR_BLACK)
+		curses.init_pair(5,curses.COLOR_YELLOW,curses.COLOR_BLACK)
+		curses.init_pair(6,curses.COLOR_WHITE,curses.COLOR_BLUE)
+		curses.init_pair(7,curses.COLOR_WHITE,curses.COLOR_RED)
 
 		try:
-			dialog(welcome)
+			dialog(welcome,(True,6))
+		except SystemExit:
+			curses.endwin()
+			sys.exit(0)
 		except:
 			curses.endwin()
-			print "Basic Rendering is not working.  You terminal may be too small."
+			print("Basic Rendering is not working.  You terminal may be too small.")
 			sys.exit(0)
 
-		reset()
 		paddle = Paddle()
 		ball = Ball()
+		reset()
 
 		while True:
 			input = scr.getch()
@@ -269,7 +338,7 @@ def main():
 			elif input == KEY_SPACE and ball.ready_to_spawn():
 				ball.spawn()
 			elif input == KEY_p:
-				dialog(pause)
+				dialog(pause,(False,6))
 			elif input in [KEY_ESC,KEY_q]:
 				break
 			frame_score, frame_died = ball.move()
@@ -277,8 +346,8 @@ def main():
 				score = score + 1
 			if frame_died:
 				ball_count = ball_count - 1
-				if ball_count == -1:
-					dialog(gameover[:4]+[gameover[4]%score] + gameover[5:])
+			if ball_count == -1 or bricks.get_count() == 0:
+					dialog(gameover[:4]+[gameover[4]%score] + gameover[5:],(True,7))
 					reset()
 			draw_frame()
 			paddle.draw()
@@ -287,6 +356,8 @@ def main():
 			scr.move(scrh-1,scrw-1)
 			scr.refresh()
 			time.sleep(0.010)
+		curses.endwin()
+	except SystemExit:
 		curses.endwin()
 	except:
 		curses.endwin()
